@@ -441,68 +441,64 @@ def connect_texture_to_mesh(mesh_transform, image_file_path, name_prefix="textur
 
 # Removed connect_texture_with_alpha function as it's no longer needed.
 
-def organize_scene_hierarchy(mesh_transform, follicle_transform, place3d_node, name_prefix):
+def organize_scene_hierarchy(mesh_transform, follicle_transform, place3d_node, name_prefix, master_group_name=None):
     """
     Organizes the scene hierarchy according to specified requirements:
-    1. Places mesh under GEO group
-    2. Creates RIG group with prefix_Texture_ctrl_grp for follicle
-    3. Places place3dTexture under UTIL group (if provided)
-    4. Sets follicle shape node visibility to off
-    5. Sets UTIL group visibility to off
+    1. Creates or finds a master group for the TextureRigger setup
+    2. Places mesh under GEO group
+    3. Creates RIG group with prefix_Texture_ctrl_grp for follicle
+    4. Places place3dTexture under UTIL group (if provided)
+    5. Sets follicle shape node visibility to off
+    6. Sets UTIL group visibility to off
     
     Args:
         mesh_transform (str): The mesh transform node
         follicle_transform (str): The follicle transform node
         place3d_node (str): The place3dTexture node (can be None for UV-based method)
         name_prefix (str): User-provided prefix for naming
+        master_group_name (str, optional): Name for the master group. Auto-generated if None.
     Returns:
         str: The (potentially updated) full path of the mesh transform.
     """
     if not follicle_transform:
         cmds.warning("Missing follicle node for scene organization.")
-        # Return original mesh_transform as we can't be sure of its state if other critical nodes are missing
         return cmds.ls(mesh_transform, long=True)[0] if cmds.objExists(mesh_transform) else mesh_transform
 
     # This will be the path of the mesh after this function.
-    final_mesh_path = mesh_transform # Initialize with the input path
+    final_mesh_path = mesh_transform
 
-    # 1. GEO group for mesh
-    geo_group_name = "GEO"
-    geo_group_long_name = ""
-    if not cmds.objExists(geo_group_name):
-        geo_group_long_name = cmds.group(empty=True, name=geo_group_name, world=True)
-    else:
-        geo_group_long_name = cmds.ls(geo_group_name, long=True)[0]
+    # --- Master Group (TextureRigSystem) ---
+    if not master_group_name:
+        master_group_name = "TextureRigSystem"
     
-    if cmds.objExists(mesh_transform):
-        # Get current full path of the mesh, in case mesh_transform was a short name
-        current_mesh_full_path = cmds.ls(mesh_transform, long=True)[0]
-        
-        parent_list = cmds.listRelatives(current_mesh_full_path, parent=True, fullPath=True)
-        current_parent_full_path = parent_list[0] if parent_list else None
+    master_group_long_name = ""
+    if not cmds.objExists(master_group_name):
+        master_group_long_name = cmds.group(empty=True, name=master_group_name, world=True)
+        # Add identifier attribute
+        cmds.addAttr(master_group_long_name, longName="isTextureRiggerSetup", attributeType="bool", defaultValue=True)
+        cmds.setAttr(f"{master_group_long_name}.isTextureRiggerSetup", lock=True)
+        cmds.addAttr(master_group_long_name, longName="textureRiggerVersion", dataType="string")
+        cmds.setAttr(f"{master_group_long_name}.textureRiggerVersion", "0.1.0", type="string", lock=True)
+    else:
+        master_group_long_name = cmds.ls(master_group_name, long=True)[0]
 
-        if current_parent_full_path != geo_group_long_name:
-            # cmds.parent returns a list of new full paths of moved objects
-            moved_objects = cmds.parent(current_mesh_full_path, geo_group_long_name)
-            if moved_objects:
-                final_mesh_path = moved_objects[0]
-            else:
-                cmds.warning(f"Failed to parent '{current_mesh_full_path}' under '{geo_group_long_name}'.")
-                final_mesh_path = current_mesh_full_path
-        else:
-            # Already under the correct GEO group, ensure final_mesh_path is the full path.
-            final_mesh_path = current_mesh_full_path
+    # Mesh stays where it is (no GEO group)
+    if cmds.objExists(mesh_transform):
+        final_mesh_path = cmds.ls(mesh_transform, long=True)[0]
     else:
         cmds.warning(f"Mesh '{mesh_transform}' not found at the start of scene organization.")
-        # final_mesh_path remains the original, potentially invalid, mesh_transform
     
     # ... existing code for RIG group ...
     rig_group_name = "RIG"
     rig_group_long_name = ""
-    if not cmds.objExists(rig_group_name):
-        rig_group_long_name = cmds.group(empty=True, name=rig_group_name, world=True)
-    else:
-        rig_group_long_name = cmds.ls(rig_group_name, long=True)[0]
+    # Look for RIG under master group
+    rig_candidates = cmds.listRelatives(master_group_long_name, children=True, type="transform", fullPath=True) or []
+    for c in rig_candidates:
+        if c.split('|')[-1] == rig_group_name:
+            rig_group_long_name = c
+            break
+    if not rig_group_long_name:
+        rig_group_long_name = cmds.group(empty=True, name=rig_group_name, parent=master_group_long_name)
     
     texture_ctrl_grp_name = f"{name_prefix}_Texture_ctrl_grp"
     texture_ctrl_grp_long_name = ""
@@ -533,10 +529,14 @@ def organize_scene_hierarchy(mesh_transform, follicle_transform, place3d_node, n
     # Handle place3d_node (if provided) - Modified to handle None case
     util_group_name = "UTIL"
     util_group_long_name = ""
-    if not cmds.objExists(util_group_name):
-        util_group_long_name = cmds.group(empty=True, name=util_group_name, world=True)
-    else:
-        util_group_long_name = cmds.ls(util_group_name, long=True)[0]
+    # Look for UTIL under master group
+    util_candidates = cmds.listRelatives(master_group_long_name, children=True, type="transform", fullPath=True) or []
+    for c in util_candidates:
+        if c.split('|')[-1] == util_group_name:
+            util_group_long_name = c
+            break
+    if not util_group_long_name:
+        util_group_long_name = cmds.group(empty=True, name=util_group_name, parent=master_group_long_name)
 
     if place3d_node and cmds.objExists(place3d_node):
         current_p3d_parent_list = cmds.listRelatives(place3d_node, parent=True, fullPath=True)
@@ -739,3 +739,201 @@ def run_step3_logic(mesh_transform, image_file_path=None, name_prefix="textureRi
         cmds.warning(f"Skipping scene organization for prefix '{name_prefix}' due to missing follicle or place3dTexture node.")
             
     return file_node, projection_node, place2d_node, place3d_node, layered_texture, material, updated_mesh_path_after_organization
+
+
+# --- Layer Management ---
+
+def get_layer_info(layered_texture_node):
+    """
+    Gets information about all connected layers in a layeredTexture node.
+    
+    Args:
+        layered_texture_node (str): The layeredTexture node name
+        
+    Returns:
+        list: List of dicts with 'index', 'color_source', 'alpha_source' keys, sorted by index
+    """
+    if not layered_texture_node or not cmds.objExists(layered_texture_node):
+        return []
+    
+    layers = []
+    connected_attrs = cmds.listConnections(layered_texture_node, connections=True, plugs=True, source=True, destination=False) or []
+    
+    found_indices = set()
+    for i in range(0, len(connected_attrs), 2):
+        attr = connected_attrs[i]
+        source = connected_attrs[i + 1]
+        if ".inputs[" in attr:
+            try:
+                idx = int(attr.split(".inputs[")[1].split("]")[0])
+                found_indices.add(idx)
+            except (ValueError, IndexError):
+                continue
+    
+    for idx in sorted(found_indices):
+        color_conns = cmds.listConnections(f"{layered_texture_node}.inputs[{idx}].color", source=True, destination=False, plugs=True) or []
+        alpha_conns = cmds.listConnections(f"{layered_texture_node}.inputs[{idx}].alpha", source=True, destination=False, plugs=True) or []
+        
+        color_src = color_conns[0] if color_conns else None
+        alpha_src = alpha_conns[0] if alpha_conns else None
+        
+        # Try to get a readable name from the color source
+        display_name = ""
+        if color_src:
+            src_node = color_src.split('.')[0]
+            display_name = src_node
+        
+        layers.append({
+            'index': idx,
+            'color_source': color_src,
+            'alpha_source': alpha_src,
+            'display_name': display_name
+        })
+    
+    return layers
+
+
+def swap_layers(layered_texture_node, index_a, index_b):
+    """
+    Swaps two layers in a layeredTexture node.
+    
+    Args:
+        layered_texture_node (str): The layeredTexture node name
+        index_a (int): First layer index
+        index_b (int): Second layer index
+        
+    Returns:
+        bool: True if successful
+    """
+    if not layered_texture_node or not cmds.objExists(layered_texture_node):
+        return False
+    
+    # Get connections for both layers
+    color_a = cmds.listConnections(f"{layered_texture_node}.inputs[{index_a}].color", source=True, destination=False, plugs=True)
+    alpha_a = cmds.listConnections(f"{layered_texture_node}.inputs[{index_a}].alpha", source=True, destination=False, plugs=True)
+    color_b = cmds.listConnections(f"{layered_texture_node}.inputs[{index_b}].color", source=True, destination=False, plugs=True)
+    alpha_b = cmds.listConnections(f"{layered_texture_node}.inputs[{index_b}].alpha", source=True, destination=False, plugs=True)
+    
+    # Disconnect all
+    if color_a:
+        cmds.disconnectAttr(color_a[0], f"{layered_texture_node}.inputs[{index_a}].color")
+    if alpha_a:
+        cmds.disconnectAttr(alpha_a[0], f"{layered_texture_node}.inputs[{index_a}].alpha")
+    if color_b:
+        cmds.disconnectAttr(color_b[0], f"{layered_texture_node}.inputs[{index_b}].color")
+    if alpha_b:
+        cmds.disconnectAttr(alpha_b[0], f"{layered_texture_node}.inputs[{index_b}].alpha")
+    
+    # Reconnect swapped
+    if color_b:
+        cmds.connectAttr(color_b[0], f"{layered_texture_node}.inputs[{index_a}].color", force=True)
+    if alpha_b:
+        cmds.connectAttr(alpha_b[0], f"{layered_texture_node}.inputs[{index_a}].alpha", force=True)
+    if color_a:
+        cmds.connectAttr(color_a[0], f"{layered_texture_node}.inputs[{index_b}].color", force=True)
+    if alpha_a:
+        cmds.connectAttr(alpha_a[0], f"{layered_texture_node}.inputs[{index_b}].alpha", force=True)
+    
+    print(f"Swapped layers {index_a} and {index_b} in {layered_texture_node}")
+    return True
+
+
+# --- Existing Setup Scanning ---
+
+def scan_existing_setups():
+    """
+    Scans the scene for existing TextureRigger master groups.
+    
+    Returns:
+        list: List of dicts with 'master_group', 'mesh', 'prefixes' keys
+    """
+    setups = []
+    
+    # Find all nodes with the isTextureRiggerSetup attribute
+    all_transforms = cmds.ls(type="transform") or []
+    for node in all_transforms:
+        if cmds.attributeQuery("isTextureRiggerSetup", node=node, exists=True):
+            setup_info = {'master_group': node, 'mesh': None, 'prefixes': []}
+            
+            node_children = cmds.listRelatives(node, children=True, type="transform", fullPath=True) or []
+            
+            # Try to find mesh from follicle connections in the RIG group
+            for child in node_children:
+                if child.split('|')[-1] == "RIG":
+                    rig_children = cmds.listRelatives(child, children=True, type="transform") or []
+                    for rc in rig_children:
+                        rc_short = rc.split('|')[-1]
+                        if rc_short.endswith("_Texture_ctrl_grp"):
+                            prefix = rc_short.replace("_Texture_ctrl_grp", "")
+                            setup_info['prefixes'].append(prefix)
+                            
+                            # Find mesh from follicle inputMesh connection
+                            if not setup_info['mesh']:
+                                follicles = cmds.listRelatives(rc, allDescendents=True, type="follicle") or []
+                                for fol_shape in follicles:
+                                    mesh_conns = cmds.listConnections(f"{fol_shape}.inputMesh", source=True, destination=False, shapes=True) or []
+                                    for mc in mesh_conns:
+                                        mesh_transforms = cmds.listRelatives(mc, parent=True, type="transform")
+                                        if mesh_transforms:
+                                            setup_info['mesh'] = mesh_transforms[0]
+                                            break
+                                    if setup_info['mesh']:
+                                        break
+                    break
+            
+            # Legacy support: also check for GEO group (old setups)
+            if not setup_info['mesh']:
+                for child in node_children:
+                    if child.split('|')[-1] == "GEO":
+                        geo_children = cmds.listRelatives(child, children=True, type="transform") or []
+                        for geo_child in geo_children:
+                            shapes = cmds.listRelatives(geo_child, shapes=True, type="mesh")
+                            if shapes:
+                                setup_info['mesh'] = geo_child
+                                break
+                        break
+            
+            setups.append(setup_info)
+    
+    return setups
+
+
+# --- Arnold/Redshift Material Support ---
+
+def get_material_color_and_opacity_attrs(material):
+    """
+    Returns the appropriate color and opacity/transparency attribute names
+    for the given material type (Lambert, Arnold aiStandardSurface, Redshift, etc.)
+    
+    Args:
+        material (str): Material node name
+        
+    Returns:
+        tuple: (color_attr, opacity_attr) or (None, None)
+    """
+    if not material or not cmds.objExists(material):
+        return None, None
+    
+    mat_type = cmds.objectType(material)
+    
+    # Arnold aiStandardSurface
+    if mat_type == 'aiStandardSurface':
+        return f"{material}.baseColor", f"{material}.opacity"
+    
+    # Redshift
+    if mat_type == 'RedshiftStandardMaterial':
+        return f"{material}.diffuse_color", f"{material}.opacity_color"
+    
+    # Standard Maya materials
+    if cmds.attributeQuery('baseColor', node=material, exists=True):
+        opacity = f"{material}.opacity" if cmds.attributeQuery('opacity', node=material, exists=True) else None
+        return f"{material}.baseColor", opacity
+    
+    if cmds.attributeQuery('color', node=material, exists=True):
+        transparency = f"{material}.transparency" if cmds.attributeQuery('transparency', node=material, exists=True) else None
+        return f"{material}.color", transparency
+    
+    if cmds.attributeQuery('diffuseColor', node=material, exists=True):
+        return f"{material}.diffuseColor", None
+    
+    return None, None

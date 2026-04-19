@@ -1,6 +1,77 @@
 import maya.cmds as cmds
 import maya.OpenMaya as om
 
+# Control shape definitions
+CONTROL_SHAPES = ['circle', 'square', 'diamond', 'triangle', 'arrow']
+
+# Control color index map (Maya override color indices)
+CONTROL_COLORS = {
+    'Default': 0,
+    'Red': 13,
+    'Blue': 6,
+    'Yellow': 17,
+    'Green': 14,
+    'Pink': 20,
+    'Cyan': 18,
+    'White': 16,
+    'Light Blue': 15,
+    'Orange': 12,
+}
+
+
+def create_control_curve(name, shape='circle', radius=1):
+    """
+    Creates a NURBS control curve with the given shape.
+    
+    Args:
+        name (str): Name for the control curve
+        shape (str): Shape type ('circle', 'square', 'diamond', 'triangle', 'arrow')
+        radius (float): Size of the control
+        
+    Returns:
+        str: Name of the created control curve or None
+    """
+    r = radius
+    ctrl = None
+    if shape == 'square':
+        ctrl = cmds.curve(name=name, degree=1,
+                         point=[(-r, 0, -r), (-r, 0, r), (r, 0, r), (r, 0, -r), (-r, 0, -r)])
+    elif shape == 'diamond':
+        ctrl = cmds.curve(name=name, degree=1,
+                         point=[(0, 0, -r), (-r, 0, 0), (0, 0, r), (r, 0, 0), (0, 0, -r)])
+    elif shape == 'triangle':
+        h = r * 1.155
+        ctrl = cmds.curve(name=name, degree=1,
+                         point=[(-r, 0, -r*0.577), (r, 0, -r*0.577), (0, 0, h - r*0.577), (-r, 0, -r*0.577)])
+    elif shape == 'arrow':
+        s = r * 0.5
+        ctrl = cmds.curve(name=name, degree=1,
+                         point=[(0, 0, -s*2), (-s, 0, 0), (-s*0.5, 0, 0), (-s*0.5, 0, s*2),
+                                (s*0.5, 0, s*2), (s*0.5, 0, 0), (s, 0, 0), (0, 0, -s*2)])
+    else:  # default: circle
+        result = cmds.circle(name=name, normal=(0, 1, 0), radius=r)
+        ctrl = result[0] if result else None
+    return ctrl
+
+
+def set_control_color(ctrl, color_name='Default'):
+    """
+    Sets the override display color of a control curve.
+    
+    Args:
+        ctrl (str): Name of the control curve
+        color_name (str): Color name from CONTROL_COLORS dict
+    """
+    if not ctrl or not cmds.objExists(ctrl):
+        return
+    color_index = CONTROL_COLORS.get(color_name, 0)
+    if color_index == 0:
+        return  # Default means no override
+    shapes = cmds.listRelatives(ctrl, shapes=True) or []
+    for shape in shapes:
+        cmds.setAttr(f"{shape}.overrideEnabled", 1)
+        cmds.setAttr(f"{shape}.overrideColor", color_index)
+
 def get_uv_at_point(mesh_shape, world_point_mvector):
     """
     Finds the closest UV coordinate on the mesh for a given world space point.
@@ -122,7 +193,7 @@ def create_follicle_at_uv(mesh_shape_name, u_coord, v_coord, name_prefix="textur
     print(f"Follicle '{follicle_transform_name}' and parent group '{parent_grp_name}' created at UV ({u_coord}, {v_coord}).")
     return follicle_transform_name, parent_grp_name
 
-def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix):
+def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix, ctrl_shape='circle', ctrl_color='Default'):
     """
     Creates advanced connections and controller for the follicle.
     
@@ -130,6 +201,8 @@ def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix):
         follicle_transform (str): Name of the follicle transform node.
         follicle_shape (str): Name of the follicle shape node.
         node_prefix (str): Name prefix to be used for nodes created inside.
+        ctrl_shape (str): Shape type for the control curve ('circle', 'square', 'diamond', 'triangle', 'arrow')
+        ctrl_color (str): Color name for the control curve (from CONTROL_COLORS)
     
     Returns:
         tuple: (slide_ctrl_name, bind_joint_name) if successful, otherwise (None, None)
@@ -170,14 +243,18 @@ def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix):
 
         position_grp = cmds.group(empty=True, name=f"{base_name}_position_grp", parent=follicle_transform)
         invert_grp = cmds.group(empty=True, name=f"{base_name}_Invert_grp", parent=position_grp)
-        slide_ctrl_result = cmds.circle(name=f"{base_name}_Slide_ctrl", normal=(0, 1, 0), radius=1)
         
-        if not slide_ctrl_result:
+        # Create control curve with selected shape
+        slide_ctrl = create_control_curve(f"{base_name}_Slide_ctrl", shape=ctrl_shape, radius=1)
+        
+        if not slide_ctrl:
             cmds.warning("Failed to create Slide_ctrl.")
             return None, None
-            
-        slide_ctrl = slide_ctrl_result[0]
+
         cmds.parent(slide_ctrl, invert_grp)
+        
+        # Apply control color
+        set_control_color(slide_ctrl, ctrl_color)
 
         cmds.addAttr(slide_ctrl, longName="Precision", attributeType="float", defaultValue=0.8)
         cmds.setAttr(f"{slide_ctrl}.Precision", keyable=True)
@@ -289,7 +366,7 @@ def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix):
         cmds.warning(f"Error creating advanced follicle connections: {e}")
         return None, None
 
-def run_step2_logic(mesh_shape_name, locator_name, name_prefix="textureRigger"):
+def run_step2_logic(mesh_shape_name, locator_name, name_prefix="textureRigger", ctrl_shape='circle', ctrl_color='Default'):
     """
     Runs the main logic of Step 2: Get UV from locator position, create follicle
     and apply advanced follicle connections.
@@ -298,6 +375,8 @@ def run_step2_logic(mesh_shape_name, locator_name, name_prefix="textureRigger"):
         mesh_shape_name (str): Name of the mesh shape node.
         locator_name (str): Name of the locator transform node.
         name_prefix (str, optional): Name prefix for objects to be created. Defaults to "textureRigger".
+        ctrl_shape (str, optional): Shape type for control curve. Defaults to 'circle'.
+        ctrl_color (str, optional): Color name for control curve. Defaults to 'Default'.
     
     Returns:
         tuple: (follicle_transform_name, slide_ctrl_name) or (None, None)
@@ -339,7 +418,7 @@ def run_step2_logic(mesh_shape_name, locator_name, name_prefix="textureRigger"):
             follicle_shape = follicle_shape_list[0]
             
             # 2. Apply advanced follicle connections
-            slide_ctrl, bind_joint = setup_follicle_connections(follicle_transform, follicle_shape, actual_prefix) # Pass actual_prefix for internal nodes
+            slide_ctrl, bind_joint = setup_follicle_connections(follicle_transform, follicle_shape, actual_prefix, ctrl_shape=ctrl_shape, ctrl_color=ctrl_color) # Pass actual_prefix for internal nodes
             
             if slide_ctrl:
                 # Delete parent_grp if it's no longer used

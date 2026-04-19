@@ -198,3 +198,52 @@ def clear_reference_follicle():
     _ref_mesh_shape = None
     print("Cleared all reference follicle data")
 
+
+def create_mirrored_locator(original_locator, mesh_transform, mirror_axis='X', mirror_prefix=''):
+    """
+    Creates a mirrored locator relative to the mesh's bounding box center.
+    
+    Args:
+        original_locator (str): Name of the original locator
+        mesh_transform (str): Name of the mesh transform node
+        mirror_axis (str): Axis to mirror across ('X', 'Y', or 'Z')
+        mirror_prefix (str): Full prefix for the mirrored locator (e.g. 'R_Eye')
+        
+    Returns:
+        str: Name of the mirrored locator or None if failed
+    """
+    if not original_locator or not cmds.objExists(original_locator):
+        cmds.warning(f"Original locator '{original_locator}' not found.")
+        return None
+    
+    if not mesh_transform or not cmds.objExists(mesh_transform):
+        cmds.warning(f"Mesh '{mesh_transform}' not found.")
+        return None
+    
+    try:
+        # Get mesh bounding box center
+        bbox = cmds.exactWorldBoundingBox(mesh_transform)
+        center = [(bbox[0]+bbox[3])/2.0, (bbox[1]+bbox[4])/2.0, (bbox[2]+bbox[5])/2.0]
+        
+        # Get original locator world position
+        pos = cmds.xform(original_locator, query=True, worldSpace=True, translation=True)
+        
+        # Mirror position relative to mesh bbox center
+        axis_map = {'X': 0, 'Y': 1, 'Z': 2}
+        axis_idx = axis_map.get(mirror_axis.upper(), 0)
+        
+        mirrored_pos = list(pos)
+        mirrored_pos[axis_idx] = 2.0 * center[axis_idx] - pos[axis_idx]
+        
+        # Create mirrored locator
+        mirror_locator_name = f"{mirror_prefix}_locator"
+        mirror_locator = cmds.spaceLocator(name=mirror_locator_name)[0]
+        cmds.xform(mirror_locator, translation=mirrored_pos, worldSpace=True)
+        
+        print(f"Created mirrored locator '{mirror_locator}' at position: {mirrored_pos} (mirrored from {pos})")
+        return mirror_locator
+        
+    except Exception as e:
+        cmds.warning(f"Error creating mirrored locator: {e}")
+        return None
+
