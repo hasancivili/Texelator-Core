@@ -250,7 +250,7 @@ def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix, 
         # Apply control color
         set_control_color(slide_ctrl, ctrl_color)
 
-        cmds.addAttr(slide_ctrl, longName="Precision", attributeType="float", defaultValue=0.8)
+        cmds.addAttr(slide_ctrl, longName="Precision", attributeType="float", defaultValue=0.1)
         cmds.setAttr(f"{slide_ctrl}.Precision", keyable=True)
 
         translate_invert_node = cmds.createNode("multiplyDivide", name=f"{base_name}_Translate_Invert")

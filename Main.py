@@ -483,6 +483,13 @@ class TexelatorUI:
         cmds.text(label="Part Control Settings:", align="left", parent=step2_col_layout)
         self.part_control_options_layout = cmds.columnLayout(adjustableColumn=True, parent=step2_col_layout)
 
+        cmds.text(
+            label=(
+                "Adjust Precision for your mesh: lower it if the control moves "
+                "too fast; increase it if it moves too slowly."
+            ),
+            align="left", wordWrap=True, parent=step2_col_layout)
+
         self.create_follicles_button = cmds.button(
             'texelatorCreateControlButton',
             label="Create Control", command=self.on_create_follicles_click,
